@@ -1,0 +1,25 @@
+{
+  "name": "telegram-cinema",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node ./src/index.js",
+    "dev": "nodemon ./src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "cheerio": "^1.0.0-rc.2",
+    "geolib": "^2.0.24",
+    "lodash": "^4.17.4",
+    "mongoose-auto-increment": "^5.0.1",
+    "needle": "^2.1.0",
+    "node-telegram-bot-api": "^0.29.0",
+    "nodemon": "^1.12.5"
+  },
+  "dependencies": {
+    "mongoose": "^4.13.7"
+  }
+}
