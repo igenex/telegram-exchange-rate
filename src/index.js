@@ -38,23 +38,40 @@ const bot = new telegramBot(config.TOKEN, {
 bot.on('message', msg => {
     "use strict";
     const chatId = helper.getChatId(msg);
-
+    let timerI = {};
     switch (msg.text) {
         case kb.home.kursi :
-            getNewExchangeRate(chatId);
-            bot.sendMessage(chatId, "Я получил!");
+            getNewExchangeRate(chatId, false);
+            bot.sendMessage(chatId, "Получаю значения курсов");
             break;
         case kb.home.kursi_loop :
-            let timer = setInterval(getNewExchangeRate, 600000,chatId);
-            kb.home.kursi_loop = "Остановить обновление";
+            console.log("Перед установкой таймера: ", timerI);
+            timerI = setInterval(getNewExchangeRate, 16000, chatId, true);
+            console.log("После установки таймера: ", timerI);
+            bot.sendMessage(chatId, "Циклическое обновление запущено", {
+                reply_markup: {
+                    keyboard: [
+                        ["Получить курсы"],
+                        ["Остановить обновление"]
+                    ]
+                }
+            });
             break;
-        case "Остановить обновление" :
-            kb.home.kursi_loop = "Запустить цикл получения курсов";
-            clearInterval(timer);
-            timer = undefined;
+        case kb.home.kursi_loop_end :
+            bot.sendMessage(chatId, "Циклическое обновление остановлено", {
+                reply_markup: {
+                    keyboard: [
+                        ["Получить курсы"],
+                        ["Запустить цикл получения курсов"]
+                    ]
+                }
+            });
+            console.log("Перед отменой таймера: ", timerI);
+            clearInterval(timerI);
+            console.log("После отмены таймера: ", timerI);
             break;
         default:
-            console.log("По умолчанию");
+            console.log("Действие по умолчанию!");
     }
 });
 
@@ -73,7 +90,7 @@ bot.onText(/\/kursi/, msg => {
 
 //==================FUNCTIONS=====================//
 
-function getNewExchangeRate(chatId) {
+function getNewExchangeRate(chatId, loop = false) {
 
     new Promise((resolve, reject) => {
         UpdatedOnSite.find().sort({$natural: -1}).limit(1)
@@ -83,23 +100,24 @@ function getNewExchangeRate(chatId) {
     }).then(time => {
         "use strict";
         console.log("time : ", time);
-            return getLastUpdateTimeFromSite(time);
-        }).then(result => {
-            console.log(result, " результат с парса времени");
+        return getLastUpdateTimeFromSite(time);
+    }).then(result => {
+        console.log(result, " результат с парса времени");
         return getContent(result);
     })
         .then(
             result => {
                 "use strict";
                 //Если данные обновились, то сохраняем в БД
-                console.log("Сохраняем данные в БД" , result);
+                console.log("Сохраняем данные в БД", result);
                 return new Promise((resolve, reject) => {
                     if (result) {
                         Exchange.find().sort({"count": -1}).limit(1)
                             .then(count => {
-                                count++;
+                                console.log("Получил count с БД: ", count[0].count);
+                                let curCount = ++count[0].count;
                                 result[0].forEach(bank => {
-                                    bank.count = count;
+                                    bank.count = curCount;
                                     new Exchange(bank).save().catch(e => console.log(e));
                                 });
                                 let Updated = {
@@ -111,7 +129,13 @@ function getNewExchangeRate(chatId) {
 
                     } else {
                         //Выводим в бот инфу, что база время обновления на сайте не поменялось
-                        sendHTML(chatId, "Данные на сайте не поменялись", 'home');
+                        let keyb = '';
+                        if(!loop) {
+                            keyb = "home";
+                        } else {
+                            keyb = "loop";
+                        }
+                        sendHTML(chatId, "Данные на сайте не поменялись", keyb);
                         reject();
                     }
                 });
@@ -122,24 +146,12 @@ function getNewExchangeRate(chatId) {
             //Получаем данные с базы данных
             console.log("Получаем данные курсов с БД");
             return new Promise((resolve, reject) => {
-                let lastDate;
-                Exchange.find().sort({"updatedActually": -1}).limit(1)
-                    .then(kursi => {
-                        return new Promise((resolve, reject) => {
-
-                            lastDate = kursi[0].updatedActually;
-                            let hDate = new Date(Date.parse(lastDate));
-                            let inputDate = new Date(hDate.getFullYear(), hDate.getMonth(), hDate.getDate(), hDate.getHours(), hDate.getMinutes(), hDate.getSeconds());
-                            resolve(inputDate.toISOString());
-                        });
-                    })
-                    .then(lDate => {
-                        Exchange.find({
-                            updatedActually: {
-                                $gte: lDate
-                            }
-                        })
+                Exchange.find().sort({"count": -1}).limit(1)
+                    .then(count => {
+                        console.log("Получили данные с курсов с цифрой ", count[0].count);
+                        Exchange.find({"count": ++count[0].count})
                             .then(kursi => {
+                                console.log(" и значение ", kursi);
                                 return new Promise((resolve, reject) => {
                                     let totalBanks = {
                                         buy: {},
@@ -158,7 +170,6 @@ function getNewExchangeRate(chatId) {
 
                                     resolve([totalBanks, kursi]);
                                 });
-
                             })
                             .then(banks => {
                                 html = `<b>Курсы за ${banks[1][0].updatedActually}</b>\n`;
@@ -171,9 +182,16 @@ function getNewExchangeRate(chatId) {
                                     html += `<strong>${banks[0].sell[kurs]}</strong> банка : ${kurs}\n`;
                                 }
                                 console.log("Тут я должен отправить данные в телегу");
-                                sendHTML(chatId, html, 'home');
+                                let keyb = "";
+                                if(!loop) {
+                                    keyb = 'home';
+                                } else {
+                                    keyb = 'loop';
+                                }
+                                sendHTML(chatId, html, keyb);
+
                             });
-                    });
+                    })
 
             });
         })
@@ -197,7 +215,7 @@ function getLastUpdateTimeFromSite(time) {
             let resultT = [];
 
             resultT.push(timeFromSite);
-            console.log(timeFromSite, " : " , time[0].updatedOnSite);
+            console.log(timeFromSite, " : ", time[0].updatedOnSite);
             if (timeFromSite !== time[0].updatedOnSite) {
                 resultT.push(true);
             } else {
